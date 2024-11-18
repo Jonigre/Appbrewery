@@ -4,7 +4,9 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
-const md5 = require("md5");
+const bcrypt = require('bcrypt');
+const saltRounds = 10;
+
 
 const app = express();
 
@@ -45,37 +47,46 @@ app.get("/register", function (req, res){
 
 
 //User registration
-app.post("/register" , async function(req, res){
-    const newUser = new User({
-        email: req.body.username,
-        password: md5(req.body.password)
-    });
+app.post("/register", async function(req, res) {
+    try {
+        // Hash the password
+        const hash = await bcrypt.hash(req.body.password, saltRounds);
 
-   try {
-    await newUser.save();
-    res.render("secrets")
-   } catch (err) {
-    console.error(err);
-    res.status(500).send("Error registering user.");
-   }
+        // Create a new user
+        const newUser = new User({
+            email: req.body.username,
+            password: hash
+        });
 
+        // Save the user and respond
+        await newUser.save();
+        res.render("secrets");
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Error registering user. Please try again.");
+    }
 });
 
+
 //User login
-app.post("/login" , async function(req, res){
-    const username = req.body.username;
-    const password = md5(req.body.password);
+app.post("/login", async function(req, res) {
+    const { username, password } = req.body;
 
     try {
+        // Find the user in the database
         const foundUser = await User.findOne({ email: username });
 
+        // Check if the user exists
         if (!foundUser) {
             console.log("User not found.");
-            res.status(401).send("Invalid email or password.");
-            return;
+            return res.status(401).send("Invalid email or password.");
         }
 
-        if (foundUser.password === password) {
+        // Compare the provided password with the hashed password
+        const match = await bcrypt.compare(password, foundUser.password);
+
+        if (match) {
+            // Password matches; render the secrets page
             res.render("secrets");
         } else {
             console.log("Incorrect password.");
@@ -86,6 +97,7 @@ app.post("/login" , async function(req, res){
         res.status(500).send("An error occurred while logging in.");
     }
 });
+
 
 
 
