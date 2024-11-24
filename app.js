@@ -4,19 +4,24 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
-const bcrypt = require('bcrypt');
-const saltRounds = 10;
+const session = require("express-session");
+const passport = require("passport");
+const passportLocalMongoose = require("passport-local-mongoose");
 
 
 const app = express();
 
 app.use(express.static("public"));
-
 app.set("view engine", "ejs");
-
 app.use(bodyParser.urlencoded({extended: true}));
+app.use(session({
+    secret: "Thisisourlittlesecret.",
+    resave: false,
+    saveUninitialized: false
+}));
 
-
+app.use(passport.initialize());
+app.use(passport.session());
 
 mongoose.connect("mongodb://localhost:27017/userDB")
 .then(() => console.log("Connected to MongoDB"))
@@ -28,8 +33,14 @@ const userSchema =  new mongoose.Schema({
     password: String
 });
 
+userSchema.plugin(passportLocalMongoose);
 
 const User = new mongoose.model("User" , userSchema);
+
+passport.use(User.createStrategy());
+
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
 
 
 app.get("/", function (req, res){
@@ -44,58 +55,60 @@ app.get("/register", function (req, res){
     res.render("register");
 });
 
+app.get("/secrets" , function(req, res){
+    if (req.isAuthenticated()){
+        res.render("secrets");
+    } else {
+        res.redirect("/login");
+    }
+});
 
+app.get("/logout", function(req, res, next) {
+    req.logout(function(err) {
+        if (err) {
+            console.error(err);
+            return next(err); // Pass the error to Express for handling
+        } else {
+            res.redirect("/"); // Redirect to the homepage or login page after successful logout
+        }
+    });
+});
 
 //User registration
-app.post("/register", async function(req, res) {
-    try {
-        // Hash the password
-        const hash = await bcrypt.hash(req.body.password, saltRounds);
-
-        // Create a new user
-        const newUser = new User({
-            email: req.body.username,
-            password: hash
-        });
-
-        // Save the user and respond
-        await newUser.save();
-        res.render("secrets");
-    } catch (err) {
-        console.error(err);
-        res.status(500).send("Error registering user. Please try again.");
-    }
+app.post("/register", function(req, res) {
+    
+    User.register({username: req.body.username}, req.body.password, function(err, user){
+        if (err){
+            console.log(err);
+            res.redirect("/register");
+        } else {
+            passport.authenticate("local")(req, res, function(){
+                res.redirect("/secrets");
+            });
+        }
+    });
 });
 
 
 //User login
-app.post("/login", async function(req, res) {
-    const { username, password } = req.body;
+app.post("/login", function(req, res) {
+   
+    const user = new User ({
+        username: req.body.username,
+        password: req.body.password
+    });
 
-    try {
-        // Find the user in the database
-        const foundUser = await User.findOne({ email: username });
-
-        // Check if the user exists
-        if (!foundUser) {
-            console.log("User not found.");
-            return res.status(401).send("Invalid email or password.");
-        }
-
-        // Compare the provided password with the hashed password
-        const match = await bcrypt.compare(password, foundUser.password);
-
-        if (match) {
-            // Password matches; render the secrets page
-            res.render("secrets");
+    req.login(user, function(err){
+        if (err){
+            console.log(err);
         } else {
-            console.log("Incorrect password.");
-            res.status(401).send("Invalid email or password.");
+            passport.authenticate("local")(req, res, function(){
+                res.redirect("/secrets");
+            });
         }
-    } catch (err) {
-        console.error(err);
-        res.status(500).send("An error occurred while logging in.");
-    }
+            
+});
+
 });
 
 
